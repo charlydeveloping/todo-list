@@ -1,0 +1,80 @@
+version: "3.9"
+
+networks:
+  todonet:
+    driver: overlay
+
+volumes:
+  pgdata:
+
+secrets:
+  db_user:
+    external: true
+  db_password:
+    external: true
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: todo_db
+      POSTGRES_USER_FILE: /run/secrets/db_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - todonet
+    secrets:
+      - db_user
+      - db_password
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  backend:
+    image: candramgar/todolist-backend:1.0
+    ports: 
+      - "3000:3000"
+    depends_on:
+      - db
+    environment:
+      PORT: 3000
+      API_PREFIX: /api
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: todo_db
+    secrets:
+      - db_user
+      - db_password
+    command: ["/bin/sh", "-lc",
+      "export PGUSER=$$(cat /run/secrets/db_user) && \
+       export PGPASSWORD=$$(cat /run/secrets/db_password) && \
+       node src/server.js"
+    ]
+    networks:
+      - todonet
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+
+  frontend:
+    image: candramgar/todolist-frontend:1.0
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    networks:
+      - todonet
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
