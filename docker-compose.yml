@@ -1,0 +1,70 @@
+# docker-compose para entorno completo: PostgreSQL + Backend + Frontend
+# Requisitos previos: haber construido las imágenes 'mi-backend' y 'mi-frontend'
+#   - backend build (desde ./backend): docker build -t mi-backend .
+#   - frontend build (desde ./frontend): docker build -t mi-frontend .
+
+version: "3.9"
+
+services:
+  # Servicio de base de datos PostgreSQL 15
+  db:
+    image: postgres:15-alpine
+    container_name: todo_db
+    environment:
+      # Variables de entorno para inicializar usuario/password/base
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-todo_db}
+    ports:
+      # Exponer puerto 5432 para conexiones locales
+      - "5433:5432"
+    volumes:
+      # Volumen persistente para datos de Postgres
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Servicio Backend (Express) usando imagen preconstruida
+  backend:
+    image: mi-backend
+    container_name: todo_backend
+    depends_on:
+      # Asegura que la DB esté corriendo antes de levantar el backend
+      db:
+        condition: service_healthy
+    environment:
+      # Config del servidor
+      PORT: 3000
+      API_PREFIX: /api
+      # Config de conexión a Postgres; host apunta al servicio 'db'
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-todo_db}
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      # Exponer API en 3000 para el host
+      - "3000:3000"
+    # Opcional: limitar recursos o reinicios
+    restart: unless-stopped
+
+  # Servicio Frontend (Nginx sirviendo el build de Vite)
+  frontend:
+    image: mi-frontend
+    container_name: todo_frontend
+    depends_on:
+      # Arranca cuando el backend ya esté levantado
+      - backend
+    ports:
+      # Exponer el sitio en 8080 para el host
+      - "8080:80"
+    restart: unless-stopped
+
+# Declaración de volúmenes para persistencia de datos
+volumes:
+  pgdata:
+    # Volumen nombrado para Postgres
+    driver: local
